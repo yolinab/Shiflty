@@ -47,67 +47,70 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
   const [error, setError] = useState('')
 
   useEffect(() => {
+
+    const loadScheduleAndAvailability = async () => {
+      try {
+        // Load schedule
+        const { data: scheduleData, error: scheduleError } = await supabase
+          .from('schedules')
+          .select('*')
+          .eq('share_code', resolvedParams.code)
+          .single()
+  
+        if (scheduleError) {
+          console.error('Error loading schedule:', scheduleError)
+          setError('Schedule not found')
+          return
+        }
+  
+        setSchedule(scheduleData)
+  
+        // Load participant availability
+        const { data: availabilityData, error: availabilityError } = await supabase
+          .from('participant_availability')
+          .select('*')
+          .eq('schedule_id', scheduleData.id)
+  
+        if (availabilityError) {
+          console.error('Error loading availability:', availabilityError)
+          setError('Failed to load availability data')
+          return
+        }
+  
+        // Process coverage data
+        const coverageData: ScheduleCoverage = {}
+        
+        Object.entries(scheduleData.daily_schedule).forEach(([day, needed]) => {
+          const typedDay = day as DayOfWeek
+          const typedNeeded = needed as DailySchedule
+          const dayAvailability = availabilityData.filter(
+            (a: ParticipantAvailability) => a.day_of_week === typedDay
+          )
+  
+          coverageData[typedDay] = {
+            needed: typedNeeded,
+            participants: dayAvailability.map((a: ParticipantAvailability) => ({
+              name: a.participant_name,
+              start: a.available_start,
+              end: a.available_end
+            }))
+          }
+        })
+  
+        setCoverage(coverageData)
+  
+      } catch (err) {
+        console.error('Unexpected error:', err)
+        setError('Failed to load schedule data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
     loadScheduleAndAvailability()
   }, [resolvedParams.code])
 
-  const loadScheduleAndAvailability = async () => {
-    try {
-      // Load schedule
-      const { data: scheduleData, error: scheduleError } = await supabase
-        .from('schedules')
-        .select('*')
-        .eq('share_code', resolvedParams.code)
-        .single()
-
-      if (scheduleError) {
-        console.error('Error loading schedule:', scheduleError)
-        setError('Schedule not found')
-        return
-      }
-
-      setSchedule(scheduleData)
-
-      // Load participant availability
-      const { data: availabilityData, error: availabilityError } = await supabase
-        .from('participant_availability')
-        .select('*')
-        .eq('schedule_id', scheduleData.id)
-
-      if (availabilityError) {
-        console.error('Error loading availability:', availabilityError)
-        setError('Failed to load availability data')
-        return
-      }
-
-      // Process coverage data
-      const coverageData: ScheduleCoverage = {}
-      
-      Object.entries(scheduleData.daily_schedule).forEach(([day, needed]) => {
-        const typedDay = day as DayOfWeek
-        const typedNeeded = needed as DailySchedule
-        const dayAvailability = availabilityData.filter(
-          (a: ParticipantAvailability) => a.day_of_week === typedDay
-        )
-
-        coverageData[typedDay] = {
-          needed: typedNeeded,
-          participants: dayAvailability.map((a: ParticipantAvailability) => ({
-            name: a.participant_name,
-            start: a.available_start,
-            end: a.available_end
-          }))
-        }
-      })
-
-      setCoverage(coverageData)
-
-    } catch (err) {
-      console.error('Unexpected error:', err)
-      setError('Failed to load schedule data')
-    } finally {
-      setLoading(false)
-    }
-  }
+  
 
   const formatTime = (time: string) => {
     return new Date(`2000-01-01T${time}`).toLocaleTimeString([], {
@@ -157,7 +160,7 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-2">Error Loading Schedule</h1>
           <p className="text-gray-600 mb-4">{error}</p>
-          <Link href="/"> className="text-blue-600 hover:text-blue-800"
+          <Link href="/" className="text-blue-600 hover:text-blue-800">
             Return to Home
           </Link>
         </div>

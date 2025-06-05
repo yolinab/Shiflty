@@ -194,7 +194,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-2">Schedule Not Found</h1>
-          <p className="text-gray-600">The schedule link you're looking for doesn't exist or has expired.</p>
+          <p className="text-gray-600">The schedule link you&apos;re looking for doesn&apos;t exist or has expired.</p>
         </div>
       </div>
     )
