@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 
@@ -38,11 +39,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
   const [availability, setAvailability] = useState<Partial<AvailabilityState>>({})
 
   // Load schedule data
-  useEffect(() => {
-    loadSchedule()
-  }, [params.code])
-
-  const loadSchedule = async () => {
+  const loadSchedule = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('schedules')
@@ -79,7 +76,11 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.code])
+
+  useEffect(() => {
+    loadSchedule()
+  }, [loadSchedule])
 
   // Toggle day availability
   const toggleDayAvailability = (day: DayOfWeek) => {
@@ -124,7 +125,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
     }
 
     const availableDays = Object.entries(availability)
-      .filter(([_, value]) => value?.available)
+      .filter(([day]) => availability[day as DayOfWeek]?.available)
       .map(([day]) => day as DayOfWeek)
 
     if (availableDays.length === 0) {
@@ -236,8 +237,11 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
               <p className="text-gray-600">
                 {new Date(schedule.start_date).toLocaleDateString()} - {new Date(schedule.end_date).toLocaleDateString()}
               </p>
-              <p className="text-sm text-gray-500 mt-2">
+              <p className="text-gray-500 mt-2">
                 Please enter your availability for each day
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                {`Don't forget to select your preferred time slots!`}
               </p>
             </div>
 
@@ -306,12 +310,12 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
             </div>
 
             <div className="flex space-x-4 mt-6">
-              <a
+              <Link
                 href="/"
                 className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 text-center"
               >
                 Back to Home
-              </a>
+              </Link>
               <button
                 onClick={submitAvailability}
                 disabled={submitting || !Object.values(availability).some(v => v?.available)}

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, use } from 'react'
 import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 
@@ -156,9 +157,9 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-2">Error Loading Schedule</h1>
           <p className="text-gray-600 mb-4">{error}</p>
-          <a href="/" className="text-blue-600 hover:text-blue-800">
+          <Link href="/"> className="text-blue-600 hover:text-blue-800"
             Return to Home
-          </a>
+          </Link>
         </div>
       </div>
     )
@@ -229,18 +230,18 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
             </div>
 
             <div className="mt-8 text-center">
-              <a
+              <Link
                 href={`/schedule/${resolvedParams.code}`}
                 className="inline-block bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 mr-4"
               >
                 Add Availability
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/"
                 className="inline-block bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600"
               >
                 Back to Home
-              </a>
+              </Link>
             </div>
           </>
         )}

@@ -94,7 +94,7 @@ export default function HomePage() {
       })
 
       // Insert into database
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('schedules')
         .insert([
           {
