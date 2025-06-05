@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, use } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 
@@ -27,7 +27,8 @@ interface Availability {
 
 type AvailabilityState = Record<DayOfWeek, Availability>
 
-export default function SchedulePage({ params }: { params: { code: string } }) {
+export default function SchedulePage({ params }: { params: Promise<{ code: string }> }) {
+  const resolvedParams = use(params)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -44,7 +45,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
       const { data, error } = await supabase
         .from('schedules')
         .select('*')
-        .eq('share_code', params.code)
+        .eq('share_code', resolvedParams.code)
         .single()
 
       if (error) {
@@ -76,7 +77,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
     } finally {
       setLoading(false)
     }
-  }, [params.code])
+  }, [resolvedParams.code])
 
   useEffect(() => {
     loadSchedule()
@@ -214,7 +215,7 @@ export default function SchedulePage({ params }: { params: { code: string } }) {
           <p className="text-gray-600 mb-4">Thank you, {participantName}! Your availability has been recorded.</p>
           
           <a
-            href={`/results/${params.code}`}
+            href={`/results/${resolvedParams.code}`}
             className="inline-block bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
           >
             View Schedule Results
