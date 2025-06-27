@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import React from 'react'
 import { setHours, setMinutes, format as formatDate } from 'date-fns'
-import { allocateShifts, ShiftAssignment } from '@/lib/shiftAllocator'
+import { allocateProportionalShifts, SHIFT_BLOCKS } from '@/lib/shiftAllocator'
 
 type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 
@@ -149,10 +149,19 @@ function ResultsScheduleGrid({ schedule, coverage }: { schedule: Schedule, cover
   )
 }
 
-function FinalScheduleGrid({ schedule, assignments, timeSlots }: { schedule: Schedule, assignments: ShiftAssignment[], timeSlots: string[] }) {
+function FinalScheduleGrid({ schedule, availabilities }: { schedule: Schedule, availabilities: import('@/lib/shiftAllocator').ParticipantAvailability[] }) {
   const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
   const days = allDays.filter(day => schedule.daily_schedule[day])
-  // Assign a color to each participant
+  // Get assignments using the new proportional algorithm
+  const assignments = allocateProportionalShifts(schedule.daily_schedule, availabilities)
+  // Build a lookup: { [day]: { [blockLabel]: [participants] } }
+  const blockMap: Partial<Record<DayOfWeek, Record<string, string[]>>> = {};
+  assignments.forEach(a => {
+    if (!blockMap[a.day]) blockMap[a.day] = {}
+    if (!blockMap[a.day]?.[a.slot]) blockMap[a.day]![a.slot] = []
+    blockMap[a.day]![a.slot].push(a.participant)
+  })
+  // Get all participant names
   const participantNames = Array.from(new Set(assignments.map(a => a.participant)))
   const colors = [
     'bg-blue-200', 'bg-green-200', 'bg-yellow-200', 'bg-pink-200', 'bg-purple-200', 'bg-orange-200', 'bg-teal-200',
@@ -162,10 +171,9 @@ function FinalScheduleGrid({ schedule, assignments, timeSlots }: { schedule: Sch
   participantNames.forEach((name, i) => {
     colorMap[name] = colors[i % colors.length]
   })
-  // Render
   return (
     <div className="overflow-x-auto mt-10">
-      <h2 className="text-xl font-bold text-gray-900 mb-2">Final Schedule (First Come First Serve)</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-2">Final Schedule (Proportional Allocation)</h2>
       <table className="min-w-full border-collapse select-none">
         <thead>
           <tr>
@@ -178,30 +186,53 @@ function FinalScheduleGrid({ schedule, assignments, timeSlots }: { schedule: Sch
           </tr>
         </thead>
         <tbody>
-          {timeSlots.map((slot, rowIdx) => (
-            <tr key={slot}>
-              <td className={`text-right pr-2 text-gray-900 align-middle whitespace-nowrap`} style={{ fontSize: '0.90em', height: '24px', verticalAlign: 'middle' }}>
-                {rowIdx % 2 === 0 ? formatDate(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a') : ''}
-              </td>
-              {days.map(day => {
-                const { start, end } = schedule.daily_schedule[day]
-                const startIdx = timeSlots.findIndex(t => t === start)
-                const endIdx = timeSlots.findIndex(t => t === end)
-                if (rowIdx < startIdx || rowIdx >= endIdx) {
-                  return <td key={day + slot} className="bg-gray-100" style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}></td>
-                }
-                const assignment = assignments.find(a => a.day === day && a.slot === slot)
-                if (!assignment) {
-                  return <td key={day + slot} className="border border-gray-200" style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}></td>
-                }
-                return (
-                  <td key={day + slot} className={`border border-gray-200 ${colorMap[assignment.participant]}`} style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}>
-                    <span className="text-[10px] text-gray-900 font-semibold truncate" title={assignment.participant}>{assignment.participant}</span>
+          {(() => {
+            // For each shift index (0, 1, 2), render a row for that shift across all days
+            const maxBlocks = Math.max(...days.map(day => SHIFT_BLOCKS[day].length))
+            return Array.from({ length: maxBlocks }).map((_, blockIdx) => (
+              <tr key={blockIdx}>
+                <td className="text-right pr-2 text-gray-900 align-middle whitespace-nowrap font-semibold" style={{ fontSize: '0.95em', height: '32px', verticalAlign: 'middle' }}>
+                  {/* Use the label from the first day that has this block */}
+                  {(() => {
+                    const dayWithBlock = days.find(day => SHIFT_BLOCKS[day][blockIdx])
+                    return dayWithBlock ? SHIFT_BLOCKS[dayWithBlock][blockIdx].label : ''
+                  })()}
+                </td>
+                {days.map(day => {
+                  const block = SHIFT_BLOCKS[day][blockIdx]
+                  if (!block) {
+                    return <td key={day + '-empty-' + blockIdx} className="bg-gray-100" style={{ minWidth: 60, maxWidth: 120, height: '32px', padding: 0 }}></td>
+                  }
+                  // Find assignment(s) and their flags
+                  const blockAssignments = assignments.filter(a => a.day === day && a.slot === block.label)
+                  if (blockAssignments.length === 0 || (blockAssignments[0].flag === 'uncovered')) {
+                    return <td key={day + block.label} className="bg-red-200 text-red-900 text-xs font-bold text-center" style={{ minWidth: 60, maxWidth: 120, height: '32px', padding: 0 }} title="Uncovered">Uncovered</td>
+                  }
+                  if (blockAssignments[0].flag === 'multi-shift') {
+                    return <td key={day + block.label} className="bg-yellow-200 text-yellow-900 text-xs font-bold text-center" style={{ minWidth: 60, maxWidth: 120, height: '32px', padding: 0 }} title="Multi-shift">
+                      {blockAssignments.map(a => (
+                        <span key={a.participant} className={`inline-block px-2 py-1 rounded ${colorMap[a.participant]} text-gray-900 text-xs font-semibold mr-1`}>{a.participant}</span>
+                      ))}
+                      <span className="block text-xs text-yellow-900 font-bold">Multi-shift</span>
+                    </td>
+                  }
+                  if (blockAssignments[0].flag === 'partial') {
+                    return <td key={day + block.label} className="bg-orange-200 text-orange-900 text-xs font-bold text-center" style={{ minWidth: 60, maxWidth: 120, height: '32px', padding: 0 }} title="Partial coverage">
+                      {blockAssignments.map(a => (
+                        <span key={a.participant} className={`inline-block px-2 py-1 rounded ${colorMap[a.participant]} text-gray-900 text-xs font-semibold mr-1`}>{a.participant}</span>
+                      ))}
+                      <span className="block text-xs text-orange-900 font-bold">Partial</span>
+                    </td>
+                  }
+                  return <td key={day + block.label} className="border border-gray-200 p-0 text-center" style={{ minWidth: 60, maxWidth: 120, height: '32px', padding: 0 }}>
+                    {blockAssignments.map(a => (
+                      <span key={a.participant} className={`inline-block px-2 py-1 rounded ${colorMap[a.participant]} text-gray-900 text-xs font-semibold mr-1`}>{a.participant}</span>
+                    ))}
                   </td>
-                )
-              })}
-            </tr>
-          ))}
+                })}
+              </tr>
+            ))
+          })()}
         </tbody>
       </table>
       <div className="flex flex-wrap gap-2 mt-4">
@@ -210,8 +241,10 @@ function FinalScheduleGrid({ schedule, assignments, timeSlots }: { schedule: Sch
             {name}
           </span>
         ))}
+        <span className="inline-flex items-center px-2 py-1 rounded bg-red-200 text-red-900 text-xs font-semibold">Uncovered</span>
+        <span className="inline-flex items-center px-2 py-1 rounded bg-yellow-200 text-yellow-900 text-xs font-semibold">Multi-shift</span>
       </div>
-      <div className="text-xs text-gray-700 mt-2">This is the final assigned schedule using the selected algorithm.</div>
+      <div className="text-xs text-gray-700 mt-2">Each cell shows all assigned staff for that shift. Red = uncovered, yellow = multi-shift.</div>
     </div>
   )
 }
@@ -367,24 +400,6 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
             <ResultsScheduleGrid schedule={schedule} coverage={coverage} />
 
             {(() => {
-              // Build timeSlots
-              const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-              const days = allDays.filter(day => schedule.daily_schedule[day])
-              let minTime = 24, maxTime = 0
-              days.forEach(day => {
-                const { start, end } = schedule.daily_schedule[day]
-                if (start && end) {
-                  const [startH, startM] = start.split(':').map(Number)
-                  const [endH, endM] = end.split(':').map(Number)
-                  minTime = Math.min(minTime, startH + (startM ? 0.5 : 0))
-                  maxTime = Math.max(maxTime, endH + (endM ? 0.5 : 0))
-                }
-              })
-              const timeSlots: string[] = []
-              for (let h = Math.floor(minTime); h < Math.ceil(maxTime); h++) {
-                timeSlots.push(`${h.toString().padStart(2, '0')}:00`)
-                timeSlots.push(`${h.toString().padStart(2, '0')}:30`)
-              }
               // Build availabilities for the allocator
               const availabilities: import('@/lib/shiftAllocator').ParticipantAvailability[] = []
               Object.entries(coverage).forEach(([day, dayCov]) => {
@@ -392,14 +407,13 @@ export default function ResultsPage({ params }: { params: Promise<{ code: string
                 dayCov.participants.forEach(p => {
                   availabilities.push({
                     participant_name: p.name,
-                    day_of_week: day,
+                    day_of_week: day as DayOfWeek,
                     available_start: p.start,
                     available_end: p.end
                   })
                 })
               })
-              const assignments = allocateShifts(schedule.daily_schedule, availabilities, timeSlots)
-              return <FinalScheduleGrid schedule={schedule} assignments={assignments} timeSlots={timeSlots} />
+              return <FinalScheduleGrid schedule={schedule} availabilities={availabilities} />
             })()}
 
             <div className="mt-8 text-center">

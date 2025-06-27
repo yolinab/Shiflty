@@ -128,7 +128,7 @@ function WeekAvailabilityGrid({ schedule, availability, setAvailability }: {
   // Render
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full border-collapse select-none">
+      <table className="min-w-full border-collapse select-none relative">
         <thead>
           <tr>
             <th className="w-10"></th>
@@ -151,31 +151,43 @@ function WeekAvailabilityGrid({ schedule, availability, setAvailability }: {
           </tr>
         </thead>
         <tbody>
+          {/* Hour label row (between slot rows) */}
           {timeSlots.map((slot, rowIdx) => (
-            <tr key={slot}>
-              <td className={`text-right pr-2 text-gray-900 align-middle whitespace-nowrap`} style={{ fontSize: '0.90em', height: '24px', verticalAlign: 'middle' }}>
-                {rowIdx % 2 === 0 ? formatDate(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a') : ''}
-              </td>
-              {days.map(day => {
-                const { startIdx, endIdx } = getDaySlotIndices(day)
-                if (rowIdx < startIdx || rowIdx >= endIdx) {
-                  return <td key={day + slot} className="bg-gray-100" style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}></td>
-                }
-                const selected = getSelectedIndices(day)
-                const isFilled = selected.includes(rowIdx)
-                const isDragging = dragging.day === day && dragging.startIdx !== null && dragging.endIdx !== null && rowIdx >= Math.min(dragging.startIdx, dragging.endIdx) && rowIdx <= Math.max(dragging.startIdx, dragging.endIdx)
-                return (
-                  <td
-                    key={day + slot}
-                    className={`border border-gray-200 cursor-pointer ${isFilled ? 'bg-green-200' : ''} ${isDragging ? 'bg-green-400' : ''}`}
-                    style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}
-                    onMouseDown={() => handleMouseDown(day, rowIdx, isFilled)}
-                    onMouseEnter={() => dragging.day === day && handleMouseEnter(day, rowIdx)}
-                    onMouseUp={handleMouseUp}
-                  ></td>
-                )
-              })}
-            </tr>
+            <React.Fragment key={slot}>
+              {/* Render hour label between every two slots (i.e., before the :00 row) */}
+              {rowIdx % 2 === 0 && rowIdx !== 0 && (
+                <tr key={`label-${slot}`}> 
+                  <td className="text-right pr-2 text-gray-900 align-middle whitespace-nowrap" style={{ fontSize: '0.90em', height: '12px', verticalAlign: 'middle', border: 'none', background: 'transparent' }}>
+                    <span className="block text-xs text-gray-500" style={{ position: 'relative', top: '-8px' }}>{formatDate(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a')}</span>
+                  </td>
+                  {days.map(day => <td key={day + '-label-' + slot} style={{ height: '12px', border: 'none', background: 'transparent' }}></td>)}
+                </tr>
+              )}
+              <tr>
+                <td className={`text-right pr-2 text-gray-900 align-middle whitespace-nowrap`} style={{ fontSize: '0.90em', height: '24px', verticalAlign: 'middle' }}>
+                  {/* Hide hour label in slot rows */}
+                </td>
+                {days.map(day => {
+                  const { startIdx, endIdx } = getDaySlotIndices(day)
+                  if (rowIdx < startIdx || rowIdx >= endIdx) {
+                    return <td key={day + slot} className="bg-gray-100" style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}></td>
+                  }
+                  const selected = getSelectedIndices(day)
+                  const isFilled = selected.includes(rowIdx)
+                  const isDragging = dragging.day === day && dragging.startIdx !== null && dragging.endIdx !== null && rowIdx >= Math.min(dragging.startIdx, dragging.endIdx) && rowIdx <= Math.max(dragging.startIdx, dragging.endIdx)
+                  return (
+                    <td
+                      key={day + slot}
+                      className={`border border-gray-200 cursor-pointer ${isFilled ? 'bg-green-200' : ''} ${isDragging ? 'bg-green-400' : ''}`}
+                      style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}
+                      onMouseDown={() => handleMouseDown(day, rowIdx, isFilled)}
+                      onMouseEnter={() => dragging.day === day && handleMouseEnter(day, rowIdx)}
+                      onMouseUp={handleMouseUp}
+                    ></td>
+                  )
+                })}
+              </tr>
+            </React.Fragment>
           ))}
         </tbody>
       </table>
