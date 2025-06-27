@@ -2,8 +2,9 @@
 import { useState, useEffect, useCallback, use } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
-
-type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
+import React from 'react'
+import { setHours, setMinutes, format as formatDate } from 'date-fns'
+import type { DayOfWeek } from '@/lib/types'
 
 interface DailySchedule {
   start: string
@@ -26,6 +27,162 @@ interface Availability {
 }
 
 type AvailabilityState = Record<DayOfWeek, Availability>
+
+// Add WeekAvailabilityGrid component
+function WeekAvailabilityGrid({ schedule, availability, setAvailability }: {
+  schedule: Schedule,
+  availability: Partial<AvailabilityState>,
+  setAvailability: React.Dispatch<React.SetStateAction<Partial<AvailabilityState>>>,
+}) {
+  // Always use correct order for days
+  const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+  const days = allDays.filter(day => schedule.daily_schedule[day])
+  // Find min/max time across all days for the grid
+  let minTime = 24, maxTime = 0
+  days.forEach(day => {
+    const { start, end } = schedule.daily_schedule[day]
+    if (start && end) {
+      const [startH, startM] = start.split(':').map(Number)
+      const [endH, endM] = end.split(':').map(Number)
+      minTime = Math.min(minTime, startH + (startM ? 0.5 : 0))
+      maxTime = Math.max(maxTime, endH + (endM ? 0.5 : 0))
+    }
+  })
+  // Build time slots (30-min increments)
+  const timeSlots: string[] = []
+  for (let h = Math.floor(minTime); h < Math.ceil(maxTime); h++) {
+    timeSlots.push(`${h.toString().padStart(2, '0')}:00`)
+    timeSlots.push(`${h.toString().padStart(2, '0')}:30`)
+  }
+  // Remove slots outside boss's range for each day
+  const getDaySlotIndices = (day: DayOfWeek) => {
+    const { start, end } = schedule.daily_schedule[day]
+    const startIdx = timeSlots.findIndex(t => t === start)
+    const endIdx = timeSlots.findIndex(t => t === end)
+    return { startIdx, endIdx }
+  }
+  // Drag state
+  const [dragging, setDragging] = React.useState<{ day: DayOfWeek | null, startIdx: number | null, endIdx: number | null, selecting: boolean }>({ day: null, startIdx: null, endIdx: null, selecting: true })
+  // Get selected indices for a day
+  const getSelectedIndices = (day: DayOfWeek) => {
+    const a = availability[day]
+    if (!a || !a.available || !a.start || !a.end) return []
+    const selStart = timeSlots.findIndex(t => t === a.start)
+    const selEnd = timeSlots.findIndex(t => t === a.end)
+    if (selStart === -1 || selEnd === -1) return []
+    return Array.from({ length: selEnd - selStart }, (_, i) => selStart + i).filter(i => i >= selStart && i < selEnd)
+  }
+  // Toggle a single slot
+  const toggleSlot = (day: DayOfWeek, idx: number, isFilled: boolean) => {
+    const selected = getSelectedIndices(day)
+    if (isFilled) {
+      // Remove this slot
+      const newSelected = selected.filter(i => i !== idx)
+      if (newSelected.length === 0) {
+        setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: false, start: schedule.daily_schedule[day].start, end: schedule.daily_schedule[day].end } }))
+      } else {
+        setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: true, start: timeSlots[newSelected[0]], end: timeSlots[newSelected[newSelected.length - 1] + 1] } }))
+      }
+    } else {
+      // Add this slot
+      const newSelected = [...selected, idx].sort((a, b) => a - b)
+      setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: true, start: timeSlots[newSelected[0]], end: timeSlots[newSelected[newSelected.length - 1] + 1] } }))
+    }
+  }
+  // Mouse events
+  const handleMouseDown = (day: DayOfWeek, idx: number, isFilled: boolean) => {
+    toggleSlot(day, idx, isFilled)
+    setDragging({ day, startIdx: idx, endIdx: idx, selecting: !isFilled })
+  }
+  const handleMouseEnter = (day: DayOfWeek, idx: number) => {
+    setDragging(drag => drag.day === day ? { ...drag, endIdx: idx } : drag)
+  }
+  const handleMouseUp = () => {
+    if (dragging.day && dragging.startIdx !== null && dragging.endIdx !== null && dragging.startIdx !== dragging.endIdx) {
+      const [from, to] = [dragging.startIdx, dragging.endIdx].sort((a, b) => a - b)
+      const day = dragging.day
+      const selected = getSelectedIndices(day)
+      let newSelected: number[]
+      if (dragging.selecting) {
+        newSelected = Array.from(new Set([...selected, ...Array.from({ length: to - from + 1 }, (_, i) => from + i)])).sort((a, b) => a - b)
+      } else {
+        newSelected = selected.filter(i => i < from || i > to)
+      }
+      if (newSelected.length === 0) {
+        setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: false, start: schedule.daily_schedule[day].start, end: schedule.daily_schedule[day].end } }))
+      } else {
+        setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: true, start: timeSlots[newSelected[0]], end: timeSlots[newSelected[newSelected.length - 1] + 1] } }))
+      }
+    }
+    setDragging({ day: null, startIdx: null, endIdx: null, selecting: true })
+  }
+  // Select all for a day
+  const selectAll = (day: DayOfWeek, checked: boolean) => {
+    const { startIdx, endIdx } = getDaySlotIndices(day)
+    if (checked) {
+      setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: true, start: timeSlots[startIdx], end: timeSlots[endIdx] } }))
+    } else {
+      setAvailability(prev => ({ ...prev, [day]: { ...prev[day], available: false, start: schedule.daily_schedule[day].start, end: schedule.daily_schedule[day].end } }))
+    }
+  }
+  // Render
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse select-none">
+        <thead>
+          <tr>
+            <th className="w-10"></th>
+            {days.map(day => (
+              <th key={day} className="text-center font-semibold text-gray-900 pb-2 whitespace-nowrap" style={{ height: 28 }}>
+                <div className="flex flex-col items-center">
+                  <span className="capitalize text-base font-bold text-gray-900">{day}</span>
+                  <label className="flex items-center mt-1">
+                    <input
+                      type="checkbox"
+                      checked={!!availability[day]?.available}
+                      onChange={e => selectAll(day, e.target.checked)}
+                      className="mr-1"
+                    />
+                    <span className="text-xs text-gray-800">All day</span>
+                  </label>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {timeSlots.map((slot, rowIdx) => (
+            <tr key={slot}>
+              <td className={`text-right pr-2 text-gray-900 align-middle whitespace-nowrap`} style={{ fontSize: '0.90em', height: '24px', verticalAlign: 'middle' }}>
+                {rowIdx % 2 === 0 ? formatDate(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a') : ''}
+              </td>
+              {days.map(day => {
+                const { startIdx, endIdx } = getDaySlotIndices(day)
+                if (rowIdx < startIdx || rowIdx >= endIdx) {
+                  return <td key={day + slot} className="bg-gray-100" style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}></td>
+                }
+                const selected = getSelectedIndices(day)
+                const isFilled = selected.includes(rowIdx)
+                const isDragging = dragging.day === day && dragging.startIdx !== null && dragging.endIdx !== null && rowIdx >= Math.min(dragging.startIdx, dragging.endIdx) && rowIdx <= Math.max(dragging.startIdx, dragging.endIdx)
+                return (
+                  <td
+                    key={day + slot}
+                    className={`border border-gray-200 cursor-pointer ${isFilled ? 'bg-green-200' : ''} ${isDragging ? 'bg-green-400' : ''}`}
+                    style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}
+                    onMouseDown={() => handleMouseDown(day, rowIdx, isFilled)}
+                    onMouseEnter={() => dragging.day === day && handleMouseEnter(day, rowIdx)}
+                    onMouseUp={handleMouseUp}
+                  ></td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="text-xs text-gray-700 mt-2">Click and drag to select your available hours. Click a cell to add/remove a 30-min slot. Use the checkbox to select all hours for a day.</div>
+    </div>
+  )
+}
 
 export default function SchedulePage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params)
@@ -82,36 +239,6 @@ export default function SchedulePage({ params }: { params: Promise<{ code: strin
   useEffect(() => {
     loadSchedule()
   }, [loadSchedule])
-
-  // Toggle day availability
-  const toggleDayAvailability = (day: DayOfWeek) => {
-    setAvailability(prev => {
-      const dayAvailability = prev[day]
-      if (!dayAvailability) return prev
-      return {
-        ...prev,
-        [day]: {
-          ...dayAvailability,
-          available: !dayAvailability.available
-        }
-      }
-    })
-  }
-
-  // Update time for specific day
-  const updateTime = (day: DayOfWeek, type: 'start' | 'end', value: string) => {
-    setAvailability(prev => {
-      const dayAvailability = prev[day]
-      if (!dayAvailability) return prev
-      return {
-        ...prev,
-        [day]: {
-          ...dayAvailability,
-          [type]: value
-        }
-      }
-    })
-  }
 
   // Submit availability
   const submitAvailability = async () => {
@@ -235,19 +362,46 @@ export default function SchedulePage({ params }: { params: Promise<{ code: strin
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
                 {schedule.name || 'Work Schedule'}
               </h1>
-              <p className="text-gray-600">
-                {new Date(schedule.start_date).toLocaleDateString()} - {new Date(schedule.end_date).toLocaleDateString()}
+              <p className="text-gray-900">
+                {(() => {
+                  if (schedule.start_date && schedule.end_date && schedule.start_date !== '1970-01-01' && schedule.end_date !== '1970-01-01') {
+                    return `${new Date(schedule.start_date).toLocaleDateString()} - ${new Date(schedule.end_date).toLocaleDateString()}`
+                  } else {
+                    const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                    const presentDays = allDays.filter(day => schedule.daily_schedule[day])
+                    if (presentDays.length > 0) {
+                      // Use this week (assume current year)
+                      const firstDay = presentDays[0]
+                      const lastDay = presentDays[presentDays.length - 1]
+                      // Try to get the next occurrence of each day in this week
+                      function getNextDateOfWeek(day: DayOfWeek) {
+                        const dayIdx = allDays.indexOf(day)
+                        const now = new Date()
+                        const nowDay = now.getDay() === 0 ? 6 : now.getDay() - 1 // JS: 0=Sun, 1=Mon...
+                        const diff = (dayIdx - nowDay + 7) % 7
+                        const d = new Date(now)
+                        d.setDate(now.getDate() + diff)
+                        return d
+                      }
+                      const firstDate = getNextDateOfWeek(firstDay)
+                      const lastDate = getNextDateOfWeek(lastDay)
+                      return `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`
+                    } else {
+                      return ''
+                    }
+                  }
+                })()}
               </p>
-              <p className="text-gray-500 mt-2">
+              <p className="text-gray-900 mt-2">
                 Please enter your availability for each day
               </p>
-              <p className="text-sm text-gray-500 mt-2">
+              <p className="text-sm text-gray-900 mt-2">
                 {`Don't forget to select your preferred time slots!`}
               </p>
             </div>
 
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-900 mb-2">
                 Your Name
               </label>
               <input
@@ -255,60 +409,16 @@ export default function SchedulePage({ params }: { params: Promise<{ code: strin
                 value={participantName}
                 onChange={(e) => setParticipantName(e.target.value)}
                 placeholder="Enter your name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 required
               />
             </div>
 
-            <div className="space-y-4 mb-6">
-              <h2 className="text-lg font-semibold text-gray-900">Select Your Available Days & Times</h2>
-              
-              {(Object.keys(schedule.daily_schedule) as DayOfWeek[]).map(day => {
-                const daySchedule = schedule.daily_schedule[day]
-                const dayAvailability = availability[day]
-                
-                return (
-                  <div key={day} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id={`${day}-available`}
-                          checked={dayAvailability?.available || false}
-                          onChange={() => toggleDayAvailability(day)}
-                          className="h-4 w-4 text-blue-600 rounded"
-                        />
-                        <label htmlFor={`${day}-available`} className="ml-3">
-                          <div className="font-medium capitalize">{day}</div>
-                          <div className="text-sm text-gray-500">
-                            Needed: {daySchedule.start} - {daySchedule.end}
-                          </div>
-                        </label>
-                      </div>
-
-                      {dayAvailability?.available && (
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-600">Available:</span>
-                          <input
-                            type="time"
-                            value={dayAvailability.start}
-                            onChange={(e) => updateTime(day, 'start', e.target.value)}
-                            className="px-2 py-1 border border-gray-300 rounded text-sm"
-                          />
-                          <span className="text-gray-400">to</span>
-                          <input
-                            type="time"
-                            value={dayAvailability.end}
-                            onChange={(e) => updateTime(day, 'end', e.target.value)}
-                            className="px-2 py-1 border border-gray-300 rounded text-sm"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            <WeekAvailabilityGrid
+              schedule={schedule}
+              availability={availability}
+              setAvailability={setAvailability}
+            />
 
             <div className="flex space-x-4 mt-6">
               <Link
