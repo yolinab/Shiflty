@@ -60,48 +60,63 @@ function WeekScheduleGrid({ week, dailyHours, setDailyHours, openDays, setOpenDa
   // Helper: get time string from index
   const getTimeStr = (idx: number) => timeSlots[idx]
 
+  // Helper: get all selected slot indices for a day
+  const getSelectedIndices = (dayName: DayOfWeek) => {
+    const start = dailyHours[dayName]?.start
+    const end = dailyHours[dayName]?.end
+    const startIdx = start ? getTimeIdx(start) : null
+    const endIdx = end ? getTimeIdx(end) : null
+    if (startIdx === null || endIdx === null || startIdx === endIdx) return []
+    return Array.from({ length: endIdx - startIdx }, (_, i) => startIdx + i)
+  }
+
+  // Helper: update a single slot (add or remove)
+  const toggleSlot = (dayName: DayOfWeek, idx: number, isOpen: boolean) => {
+    const selected = getSelectedIndices(dayName)
+    if (isOpen) {
+      // Remove this slot
+      const newSelected = selected.filter(i => i !== idx)
+      if (newSelected.length === 0) {
+        setDailyHours(prev => ({ ...prev, [dayName]: { start: '', end: '' } }))
+        if (dayName === 'saturday' || dayName === 'sunday') setOpenDays(prev => ({ ...prev, [dayName]: false }))
+      } else {
+        setDailyHours(prev => ({
+          ...prev,
+          [dayName]: { start: getTimeStr(newSelected[0]), end: getTimeStr(newSelected[newSelected.length - 1] + 1) },
+        }))
+      }
+    } else {
+      // Add this slot
+      const newSelected = [...selected, idx].sort((a, b) => a - b)
+      setDailyHours(prev => ({
+        ...prev,
+        [dayName]: { start: getTimeStr(newSelected[0]), end: getTimeStr(newSelected[newSelected.length - 1] + 1) },
+      }))
+      if (dayName === 'saturday' || dayName === 'sunday') setOpenDays(prev => ({ ...prev, [dayName]: true }))
+    }
+  }
+
   // Mouse events
-  const handleMouseDown = (dayName: DayOfWeek, idx: number, isOpen: boolean) => {
-    setDragging({ day: dayName, startIdx: idx, endIdx: idx, selecting: !isOpen })
+  const handleMouseDown = (dayName: DayOfWeek, idx: number, isFilled: boolean, isOpen: boolean) => {
+    if (!isOpen) return
+    toggleSlot(dayName, idx, isFilled)
+    setDragging({ day: dayName, startIdx: idx, endIdx: idx, selecting: !isFilled })
   }
   const handleMouseEnter = (dayName: DayOfWeek, idx: number) => {
     setDragging(drag => drag.day === dayName && drag.startIdx !== null ? { ...drag, endIdx: idx } : drag)
-  }
-  const handleMouseUp = () => {
-    if (dragging.day && dragging.startIdx !== null && dragging.endIdx !== null) {
-      const [from, to] = [dragging.startIdx, dragging.endIdx].sort((a, b) => a - b)
-      const dayName = dragging.day
-      if (dragging.selecting) {
-        // Set open hours for this day
-        setDailyHours(prev => ({
-          ...prev,
-          [dayName]: { start: getTimeStr(from), end: getTimeStr(to + 1) || '20:00' },
-        }))
-        if (dayName === 'saturday' || dayName === 'sunday') {
-          setOpenDays(prev => ({ ...prev, [dayName]: true }))
-        }
-      } else {
-        // Deselect: close the day
-        setDailyHours(prev => ({ ...prev, [dayName]: { start: '', end: '' } }))
-        if (dayName === 'saturday' || dayName === 'sunday') {
-          setOpenDays(prev => ({ ...prev, [dayName]: false }))
-        }
-      }
-    }
-    setDragging({ day: null, startIdx: null, endIdx: null, selecting: true })
   }
 
   // Render
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full border-collapse select-none" onMouseUp={handleMouseUp}>
+      <table className="min-w-full border-collapse select-none">
         <thead>
           <tr>
-            <th className="w-16"></th>
+            <th className="w-10"></th>
             {week.map(day => {
               const dayName = format(day, 'EEEE').toLowerCase() as DayOfWeek
               return (
-                <th key={dayName} className="text-center font-semibold text-gray-900 pb-2">{format(day, 'EEE d')}</th>
+                <th key={dayName} className="text-center font-semibold text-gray-900 pb-2 whitespace-nowrap" style={{ height: 28 }}>{format(day, 'EEE d')}</th>
               )
             })}
           </tr>
@@ -109,23 +124,23 @@ function WeekScheduleGrid({ week, dailyHours, setDailyHours, openDays, setOpenDa
         <tbody>
           {timeSlots.map((slot, rowIdx) => (
             <tr key={slot}>
-              <td className="text-right pr-2 text-gray-800 align-middle" style={{ fontSize: '0.95em' }}>{format(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a')}</td>
+              <td className={`text-right pr-2 text-gray-800 align-middle whitespace-nowrap`} style={{ fontSize: '0.90em', height: '24px', verticalAlign: 'middle' }}>
+                {rowIdx % 2 === 0 ? format(setHours(setMinutes(new Date(), 0), parseInt(slot.split(':')[0])), 'h a') : ''}
+              </td>
               {week.map(day => {
                 const dayName = format(day, 'EEEE').toLowerCase() as DayOfWeek
                 const isWeekend = dayName === 'saturday' || dayName === 'sunday'
                 const isOpen = isWeekend ? openDays[dayName] : true
-                const start = dailyHours[dayName]?.start
-                const end = dailyHours[dayName]?.end
-                const startIdx = start ? getTimeIdx(start) : null
-                const endIdx = end ? getTimeIdx(end) : null
-                const isFilled = isOpen && startIdx !== null && endIdx !== null && rowIdx >= startIdx && rowIdx < endIdx
+                const selected = getSelectedIndices(dayName)
+                const isFilled = isOpen && selected.includes(rowIdx)
                 const isDragging = dragging.day === dayName && dragging.startIdx !== null && dragging.endIdx !== null && rowIdx >= Math.min(dragging.startIdx, dragging.endIdx) && rowIdx <= Math.max(dragging.startIdx, dragging.endIdx)
                 return (
                   <td
                     key={dayName + slot}
-                    className={`border border-gray-200 h-8 cursor-pointer ${isFilled ? 'bg-green-200' : ''} ${isDragging ? 'bg-green-400' : ''} ${!isOpen ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                    onMouseDown={() => isOpen && handleMouseDown(dayName, rowIdx, isFilled)}
-                    onMouseEnter={() => isOpen && dragging.day === dayName && handleMouseEnter(dayName, rowIdx)}
+                    className={`border border-gray-200 cursor-pointer ${isFilled ? 'bg-green-200' : ''} ${isDragging ? 'bg-green-400' : ''} ${!isOpen ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                    style={{ minWidth: 36, maxWidth: 60, height: '24px', padding: 0 }}
+                    onMouseDown={() => handleMouseDown(dayName, rowIdx, isFilled, isOpen)}
+                    onMouseEnter={() => dragging.day === dayName && handleMouseEnter(dayName, rowIdx)}
                   ></td>
                 )
               })}
@@ -153,7 +168,7 @@ function WeekScheduleGrid({ week, dailyHours, setDailyHours, openDays, setOpenDa
           </label>
         ))}
       </div>
-      <div className="text-xs text-gray-500 mt-2">Click and drag to select open hours. Click again to close the day.</div>
+      <div className="text-xs text-gray-500 mt-2">Click and drag to select open hours. Click a cell to add/remove a 30-min slot.</div>
     </div>
   )
 }
@@ -199,19 +214,17 @@ export default function HomePage() {
     const weekNumber = getWeek(week[0], { weekStartsOn: 1 })
     const year = getYear(week[0])
     setScheduleName(`Week ${weekNumber}, ${year}`)
-    // Initialize dailyHours for all days in the selected week
+    // Set default working hours for the selected week
     setDailyHours(prev => {
       const updated: DailySchedule = { ...prev }
       week.forEach(day => {
         const dayName = format(day, 'EEEE').toLowerCase() as DayOfWeek
-        if (!updated[dayName]) {
-          if (dayName === 'saturday' || dayName === 'sunday') {
-            updated[dayName] = { start: '', end: '' }
-          } else if (dayName === 'friday') {
-            updated[dayName] = { start: '10:00', end: '19:00' }
-          } else {
-            updated[dayName] = { start: '10:00', end: '19:30' }
-          }
+        if (dayName === 'saturday' || dayName === 'sunday') {
+          updated[dayName] = { start: '', end: '' }
+        } else if (dayName === 'friday') {
+          updated[dayName] = { start: '10:00', end: '19:00' }
+        } else {
+          updated[dayName] = { start: '10:00', end: '19:30' }
         }
       })
       return updated
